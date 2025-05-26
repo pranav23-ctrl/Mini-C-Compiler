@@ -4,91 +4,53 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Mini C Compiler</title>
-  <button id="themeToggle" onclick="toggleTheme()">Toggle Theme</button>
-  <style id="themeStyle">
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background-color: #121212;
-    color: #e0e0e0;
-    margin: 0;
-    padding: 2rem;
-  }
-
-  .container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
-  }
-
-  textarea, pre {
-    width: 100%;
-    padding: 1rem;
-    border-radius: 8px;
-    border: 1px solid #333;
-    background: #1e1e1e;
-    color: #fff;
-    font-family: monospace;
-    font-size: 1rem;
-  }
-
-  button {
-    margin-top: 1rem;
-    margin-right: 0.5rem;
-    padding: 0.5rem 1rem;
-    font-size: 1rem;
-    cursor: pointer;
-    background: #03dac6;
-    color: #000;
-    border: none;
-    border-radius: 6px;
-  }
-
-  .output-section h4 {
-    margin-bottom: 0.5rem;
-    color: #bb86fc;
-  }
-
-  .result-stats {
-    margin-top: 1rem;
-    background-color: #212121;
-    padding: 1rem;
-    border-left: 4px solid #03dac6;
-    border-radius: 6px;
-  }
-
-  .result-stats p {
-    margin: 0.4rem 0;
-  }
-</style>
-
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
-  <h1> Mini C Compiler </h1>
+  <header>
+    <h1>🛠️ Mini C Compiler</h1>
+    <button id="themeToggle" onclick="toggleTheme()">🌗 Toggle Theme</button>
+  </header>
 
-  <textarea id="codeInput" rows="10" cols="80">// Sample C code\nint main() { return 42; }</textarea><br>
-  <button onclick="compileLexer()">Run Lexer</button>
-  <button onclick="compileAST()">Run AST</button>
-  <button onclick="compileIR()">Generate IR</button>
-  <button onclick="compileOptimizedIR()">Optimized IR</button>
-  <button onclick="compileCodegen()">Generate WebAssembly</button>
+  <main class="editor-container">
+  
+    <div id="editor"></div>
+    <!-- Bot Launcher -->
+    <button id="botToggle" onclick="toggleBot()">🤖 AI Assistant</button>
 
-  <div class="container">
-    <div class="output-section">
-      <h4>Compilation Output</h4>
-      <pre id="output"></pre>
-      <pre id="outputWASM"></pre>
+    <!-- AI Bot Panel -->
+    <div id="botPanel">
+      <h3>🧠 AI Code Assistant</h3>
+      <textarea id="nlPrompt" placeholder="Describe your logic..."></textarea>
+      <div class="bot-actions">
+        <button onclick="startVoiceInput()">🎤 Speak</button>
+        <button onclick="generateCodeFromPrompt()">💡 Generate C Code</button>
+      </div>
     </div>
+    <label for="userInput">Simulated Input for scanf:</label>
+    <input id="userInput" type="text" placeholder="Enter value (e.g., 5)" />
 
-    <div class="result-stats">
-      <h4>🔍 Compilation Insights</h4>
-      <p id="status">Status: 🕐 Waiting...</p>
-      <p id="performance">Time: -</p>
-      <p id="successRate">Success Rate: -</p>
-      <p id="timeComplexity">Time Complexity: -</p>
-      <p id="spaceComplexity">Space Complexity: -</p>
-    </div>
-  </div>
+    <section class="buttons">
+    <button onclick="showFullResult()">💡 Show Result</button>
+    </section>
 
+    <nav class="output-tabs">
+      <div class="output-tab active" onclick="showTab('lexerOutput')">Lexer</div>
+      <div class="output-tab" onclick="showTab('astOutput')">AST</div>
+      <div class="output-tab" onclick="showTab('irOutput')">IR</div>
+      <div class="output-tab" onclick="showTab('wasmOutput')">WASM</div>
+    </nav>
+
+    <section class="outputs">
+      <pre id="lexerOutput" class="output-panel active"></pre>
+      <pre id="astOutput" class="output-panel"></pre>
+      <pre id="irOutput" class="output-panel"></pre>
+      <pre id="wasmOutput" class="output-panel"></pre>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs/loader.min.js"></script>
   <script src="clang-llvm-lld.js"></script>
   <script src="script.js"></script>
 </body>

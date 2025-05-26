@@ -1,196 +1,157 @@
+let Module;
 let compileLexer, compileAST, compileIR, compileOptimizedIR, compileCodegen;
 
-function showStats(stage, timeMs = 0, success = true) {
-  document.getElementById("status").textContent = `Status: ✅ ${stage} completed`;
-  document.getElementById("performance").textContent = `Time: ${timeMs.toFixed(2)} ms`;
-  document.getElementById("successRate").textContent = `Success Rate: ${success ? "100%" : "0%"}`;
-  document.getElementById("timeComplexity").textContent = "Time Complexity: O(1)";
-  document.getElementById("spaceComplexity").textContent = "Space Complexity: O(1)";
-}
+require.config({ paths: { 'vs': 'https://unpkg.com/monaco-editor/min/vs' } });
 
-document.addEventListener("DOMContentLoaded", () => {
-  createClangModule().then((Module) => {
-    console.log("WASM loaded");
+require(['vs/editor/editor.main'], function () {
+  window.editor = monaco.editor.create(document.getElementById('editor'), {
+    value: `// Sample C code\nint main() { return 42; }`,
+    language: 'c',
+    theme: 'vs-dark',
+    automaticLayout: true
+  });
 
-    const runLexer = Module.cwrap('run_lexer', 'string', ['string']);
-    const runAST = Module.cwrap('run_ast', 'string', ['string']);
-    const runIR = Module.cwrap('run_ir', 'string', ['string']);
-    const runOptimizedIR = Module.cwrap('run_optimized_ir', 'string', ['string']);
-    const runCodegen = Module.cwrap('run_codegen', 'string', ['string']);
+  loadWASM();
+});
 
-    compileLexer = () => {
-      const code = document.getElementById("codeInput").value;
-      const start = performance.now();
-      const result = runLexer(code);
-      const time = performance.now() - start;
+function loadWASM() {
+  createClangModule().then(mod => {
+    Module = mod; 
+    console.log("✅ WASM module loaded");
 
-      document.getElementById("output").textContent = result;
-      showStats("Token Generation", time);
+    // Make these globally accessible
+    window.runLexer = Module.cwrap('run_lexer', 'string', ['string']);
+    window.runAST = Module.cwrap('run_ast', 'string', ['string']);
+    window.runIR = Module.cwrap('run_ir', 'string', ['string']);
+    window.runOptimizedIR = Module.cwrap('run_optimized_ir', 'string', ['string']);
+    window.runCodegen = Module.cwrap('run_codegen', 'string', ['string']);
+    Module.set_user_input = Module.cwrap('set_user_input', null, ['string']);
+    const getCode = () => window.editor.getValue();
+
+    // (Optional) keep these if needed elsewhere
+    window.compileLexer = () => runStage(runLexer, getCode(), "lexerOutput", "Lexer");
+    window.compileAST = () => runStage(runAST, getCode(), "astOutput", "AST");
+    window.compileIR = () => runStage(runIR, getCode(), "irOutput", "IR");
+    window.compileOptimizedIR = () => {
+      const ir = runIR(getCode());
+      runStage(() => runOptimizedIR(ir), "", "irOutput", "Optimized IR");
     };
-
-    compileAST = () => {
-      const code = document.getElementById("codeInput").value;
-      const start = performance.now();
-      const result = runAST(code);
-      const time = performance.now() - start;
-
-      document.getElementById("output").textContent = result;
-      showStats("AST Generation", time);
-    };
-
-    compileIR = () => {
-      const code = document.getElementById("codeInput").value;
-      const start = performance.now();
-      const result = runIR(code);
-      const time = performance.now() - start;
-
-      document.getElementById("output").textContent = "LLVM IR:\n" + result;
-      showStats("IR Generation", time);
-    };
-
-    compileOptimizedIR = () => {
-      const code = document.getElementById("codeInput").value;
-      const start = performance.now();
-      const ir = runIR(code);
+    window.compileCodegen = () => {
+      const ir = runIR(getCode());
       const optimized = runOptimizedIR(ir);
-      const time = performance.now() - start;
-
-      document.getElementById("output").textContent = optimized;
-      showStats("Optimized IR Generation", time);
-    };
-
-    compileCodegen = () => {
-      const code = document.getElementById("codeInput").value;
-      const start = performance.now();
-      const ir = runIR(code);  // always regenerate IR for consistency
-      const optimized = runOptimizedIR(ir);
-      const output = runCodegen(optimized);
-      const time = performance.now() - start;
-
-      document.getElementById("outputWASM").textContent = output;
-
-      const success = !output.includes("error") && output.includes("Execution result");
-      showStats("Code Execution", time, success);
+      runStage(() => runCodegen(optimized), "", "wasmOutput", "Codegen");
     };
   });
-});
+}
+
+
+function runStage(fn, code, outputId, label) {
+  const start = performance.now();
+  let result = typeof code === "string" ? fn(code) : fn();
+  const time = performance.now() - start;
+
+  document.getElementById(outputId).textContent = result;
+  showTab(outputId);
+  showStats(label, time, !result.toLowerCase().includes("error"));
+}
+
+function showStats(stage, timeMs, success) {
+  const log = `${stage} ${success ? "✅" : "❌"} in ${timeMs.toFixed(2)} ms`;
+  console.log(log);
+}
+
 function toggleTheme() {
-  const style = document.getElementById("themeStyle");
-  const isDark = style.innerHTML.includes("background-color: #121212");
+  const light = document.body.classList.toggle("light-theme");
+  monaco.editor.setTheme(light ? "vs" : "vs-dark");
+}
 
-  if (isDark) {
-    // Light theme
-    style.innerHTML = `
-      body {
-        font-family: 'Segoe UI', sans-serif;
-        background-color: #f9f9f9;
-        color: #111;
-        margin: 0;
-        padding: 2rem;
-      }
+function showTab(id) {
+  document.querySelectorAll('.output-tab').forEach(tab => tab.classList.remove('active'));
+  document.querySelectorAll('.output-panel').forEach(panel => panel.classList.remove('active'));
 
-      .container {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-      }
-
-      textarea, pre {
-        width: 100%;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #ccc;
-        background: #fff;
-        color: #000;
-        font-family: monospace;
-        font-size: 1rem;
-      }
-
-      button {
-        margin-top: 1rem;
-        margin-right: 0.5rem;
-        padding: 0.5rem 1rem;
-        font-size: 1rem;
-        cursor: pointer;
-        background: #6200ee;
-        color: #fff;
-        border: none;
-        border-radius: 6px;
-      }
-
-      .output-section h4 {
-        margin-bottom: 0.5rem;
-        color: #6200ee;
-      }
-
-      .result-stats {
-        margin-top: 1rem;
-        background-color: #eeeeee;
-        padding: 1rem;
-        border-left: 4px solid #6200ee;
-        border-radius: 6px;
-      }
-
-      .result-stats p {
-        margin: 0.4rem 0;
-      }
-    `;
-  } else {
-    // Dark theme (reset to original)
-    style.innerHTML = `
-      body {
-        font-family: 'Segoe UI', sans-serif;
-        background-color: #121212;
-        color: #e0e0e0;
-        margin: 0;
-        padding: 2rem;
-      }
-
-      .container {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-      }
-
-      textarea, pre {
-        width: 100%;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #333;
-        background: #1e1e1e;
-        color: #fff;
-        font-family: monospace;
-        font-size: 1rem;
-      }
-
-      button {
-        margin-top: 1rem;
-        margin-right: 0.5rem;
-        padding: 0.5rem 1rem;
-        font-size: 1rem;
-        cursor: pointer;
-        background: #03dac6;
-        color: #000;
-        border: none;
-        border-radius: 6px;
-      }
-
-      .output-section h4 {
-        margin-bottom: 0.5rem;
-        color: #bb86fc;
-      }
-
-      .result-stats {
-        margin-top: 1rem;
-        background-color: #212121;
-        padding: 1rem;
-        border-left: 4px solid #03dac6;
-        border-radius: 6px;
-      }
-
-      .result-stats p {
-        margin: 0.4rem 0;
-      }
-    `;
+  const tab = document.querySelector(`.output-tab[onclick*="${id}"]`);
+  const panel = document.getElementById(id);
+  if (tab && panel) {
+    tab.classList.add('active');
+    panel.classList.add('active');
   }
+}
+function showFullResult() {
+  const code = window.editor.getValue();
+  const userInput = document.getElementById("userInput").value;
+  Module.set_user_input(userInput);
+  const start = performance.now();
+
+  const lexer = runLexer(code);
+  const ast = runAST(code);
+  const ir = runIR(code);
+  const optimizedIR = runOptimizedIR(ir);
+  const rawResult = runCodegen(optimizedIR);
+
+  const end = performance.now();
+  const execDuration = (end - start).toFixed(2);
+
+  document.getElementById("lexerOutput").textContent = lexer;
+  document.getElementById("astOutput").textContent = ast;
+  document.getElementById("irOutput").textContent = optimizedIR;
+
+ const finalOutput = `${rawResult}\nTotal Compilation Time: ${execDuration} ms`;
+
+  document.getElementById("wasmOutput").textContent = finalOutput;
+  showTab("wasmOutput");
+}
+
+function toggleBot() {
+  document.getElementById("botPanel").classList.toggle("open");
+}
+
+async function generateCodeFromPrompt() {
+  const prompt = document.getElementById("nlPrompt").value.trim();
+  if (!prompt) return alert("Please describe the code you want.");
+
+  const fullPrompt = `Write a valid C function based on the following instruction:\n"${prompt}"\nOnly provide code.`;
+
+  const response = await fetch("https://api.together.xyz/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer tgp_v1_8lk3sb6ZQ6IjNwWwXMKj-qGCwMWiECxBh9OSgI9pcZU"  // Replace this
+    },
+    body: JSON.stringify({
+      model: "mistralai/Mixtral-8x7B-Instruct-v0.1",
+      messages: [
+        { role: "system", content: "You are a helpful assistant who writes C code." },
+        { role: "user", content: fullPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 512,
+      top_p: 0.95,
+      stop: null
+    })
+  });
+
+  const data = await response.json();
+
+  const code = data?.choices?.[0]?.message?.content || "// Failed to generate.";
+  window.editor.setValue(code);
+  toggleBot();
+}
+function startVoiceInput() {
+  if (!('webkitSpeechRecognition' in window)) {
+    alert("Voice input not supported.");
+    return;
+  }
+
+  const recognition = new webkitSpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => alert("🎙️ Speak now...");
+  recognition.onresult = (event) => {
+    document.getElementById("nlPrompt").value = event.results[0][0].transcript;
+  };
+  recognition.onerror = (event) => alert("Error: " + event.error);
+
+  recognition.start();
 }

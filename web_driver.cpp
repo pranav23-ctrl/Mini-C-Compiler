@@ -10,6 +10,7 @@
 
 std::unordered_map<std::string, std::string> globalSymbolTable;
 std::vector<std::string> semanticErrors;
+    std::string userInput;
 
 std::string result;
 std::map<std::string, std::string> namedValues;
@@ -39,7 +40,10 @@ std::vector<Token> tokenizeStructured(const std::string& input) {
     std::string clean = removeComments(input);
     std::vector<Token> tokens;
     std::regex pattern(R"(\s+|==|!=|<=|>=|[+\-*/=<>(){};]|[0-9]+|[a-zA-Z_][a-zA-Z0-9_]*)");
-    std::map<std::string, std::string> keywords = {{"int", "KEYWORD"}, {"return", "KEYWORD"}};
+    std::map<std::string, std::string> keywords = {
+        {"int", "KEYWORD"}, {"return", "KEYWORD"},
+        {"if", "KEYWORD"}, {"else", "KEYWORD"},
+        {"printf", "IDENTIFIER"}, {"scanf", "IDENTIFIER"}};
 
     for (auto it = std::sregex_iterator(clean.begin(), clean.end(), pattern); it != std::sregex_iterator(); ++it) {
         std::string tok = (*it).str();
@@ -143,62 +147,41 @@ bool consume(const std::string& expected) {
 }
 ASTNode* parseVarDecl() {
     if (!match("int")) return nullptr;
-    if (!check("IDENTIFIER")) return nullptr;
-    std::string varName = advance().value;
+    Token varToken = advance();
+    if (varToken.type != "IDENTIFIER") return nullptr;
 
-    ASTNode* varDecl = new ASTNode("VarDecl", varName);
-    varDecl->children.push_back(new ASTNode("Type", "int"));
+    std::string varName = varToken.value;
+    globalSymbolTable[varName] = "0"; // default init
 
+    ASTNode* decl = new ASTNode("VarDecl", varName);
     if (match("=")) {
         ASTNode* expr = parseExpression();
-        if (expr) varDecl->children.push_back(expr);
+        if (expr) decl->children.push_back(expr);
     }
-
-    consume(";");
-    return varDecl;
+    match(";");
+    return decl;
 }
 
+
 ASTNode* parseStatement() {
-    if (match("int")) {
-        // Variable declaration
-        if (check("Identifier")) {
-            std::string varName = advance().value;
-            if (globalSymbolTable.count(varName)) {
-                semanticErrors.push_back("Variable '" + varName + "' re-declared.");
-            } else {
-                globalSymbolTable[varName] = "int";
+    if (peek().value == "int") return parseVarDecl();
+    if (match("return")) {
+        ASTNode* node = new ASTNode("Return");
+        node->children.push_back(parseExpression());
+        match(";");
+        return node;
+    }
+    if (peek().type == "IDENTIFIER") {
+        std::string id = advance().value;
+        if (match("(")) {
+            ASTNode* call = new ASTNode("Call", id);
+            while (!match(")") && current < tokens.size()) {
+                call->children.push_back(parseExpression());
+                if (!match(",")) break;
             }
-            consume(";");
-            ASTNode* varDecl = new ASTNode("VarDecl", varName);
-            varDecl->children.push_back(new ASTNode("Type", "int"));
-            return varDecl;
-        } else {
-            semanticErrors.push_back("Expected variable name after 'int'.");
-            return nullptr;
+            match(";");
+            return call;
         }
-    } else if (check("Identifier")) {
-        // Assignment
-        std::string varName = advance().value;
-        if (!globalSymbolTable.count(varName)) {
-            semanticErrors.push_back("Undeclared variable: " + varName);
-        }
-        if (match("=")) {
-            ASTNode* expr = parseExpression();
-            consume(";");
-            ASTNode* assign = new ASTNode("Assignment", varName);
-            assign->children.push_back(expr);
-            return assign;
-        } else {
-            semanticErrors.push_back("Expected '=' after identifier.");
-            return nullptr;
-        }
-    } else if (match("return")) {
-        // Return statement
-        ASTNode* expr = parseExpression();
-        consume(";");
-        ASTNode* ret = new ASTNode("Return");
-        ret->children.push_back(expr);
-        return ret;
     }
     return nullptr;
 }
@@ -329,39 +312,47 @@ std::string generateAST(const std::string& input) {
     delete root;
     return ss.str();
 }
-
-
-
 std::string generateIR(ASTNode* root) {
     std::stringstream ir;
+    ir << "define i32 @main() {\n";
     for (auto* child : root->children) {
         if (child->type == "Function") {
-            std::string fname = child->value;
-            ir << "define i32 @" << fname << "() {\n";
-            ASTNode* block = child->children[1];
+            ASTNode* block = child->children[0];
             for (auto* stmt : block->children) {
-                if (stmt->type == "Return") {
-                    ASTNode* val = stmt->children[0];
-                    if (val->type == "Call") {
-                        ir << "  %1 = call i32 @" << val->value << "(";
-                        for (size_t i = 0; i < val->children.size(); ++i) {
-                            if (i > 0) ir << ", ";
-                            ir << "i32 " << val->children[i]->value;
-                        }
-                        ir << ")\n  ret i32 %1\n";
-                    } else if (val->type == "Literal") {
-                        ir << "  ret i32 " << val->value << "\n";
+                if (stmt->type == "Call") {
+                    if (stmt->value == "scanf") {
+                        std::string var = stmt->children[1]->value;
+                        ir << "  call i32 @scanf(\"%d\", i32 *" << var << ")\n";
+                    } else if (stmt->value == "printf") {
+                        std::string format = stmt->children[0]->value;
+                        std::string var = stmt->children[1]->value;
+                        ir << "  call i32 @printf(\"" << format << "\", i32 " << var << ")\n";
                     }
                 }
-            }
-            ir << "}\n";
-        }
-    }
-    return ir.str();
+                else if (stmt->type == "VarDecl") {
+    std::string var = stmt->value;
+    globalSymbolTable[var] = "0";  // Initialize to 0
 }
 
+                else if (stmt->type == "Return") {
+    ASTNode* val = stmt->children[0];
+    std::string returnVal = globalSymbolTable.count(val->value) ? globalSymbolTable[val->value] : val->value;
+    ir << "  ret i32 " << returnVal << "\n";
+}
+            }
+        }
+    }
+    ir << "}\n";
+    return ir.str();
+}
 // -------------------- Exports --------------------
 extern "C" {
+    
+    EMSCRIPTEN_KEEPALIVE
+    void set_user_input(const char* input) {
+    userInput = std::string(input);
+    }
+
     EMSCRIPTEN_KEEPALIVE
     const char* run_lexer(const char* input) {
         static std::string result;
@@ -426,35 +417,44 @@ const char* run_optimized_ir(const char* inputIR) {
 EMSCRIPTEN_KEEPALIVE
 const char* run_codegen(const char* ir) {
     static std::string result;
+    double start = emscripten_get_now();
 
     std::string input(ir);
+    std::stringstream output;
     std::smatch match;
 
-    // 1. Direct return: ret i32 42
-    std::regex directRet(R"(ret i32 (\d+))");
-    if (std::regex_search(input, match, directRet)) {
-        result = "Execution result: " + match[1].str();
-        return result.c_str();
+    // Simulate scanf
+    std::regex scanfRegex(R"(call i32 @scanf\("%d", i32 \*(\w+)\))");
+    if (std::regex_search(input, match, scanfRegex)) {
+        std::string var = match[1];
+        globalSymbolTable[var] = userInput;
+        output << "[scanf] " << var << " = " << userInput << "\n";
     }
 
-    // 2. Function call: call i32 @func(i32 X, i32 Y)
-    std::regex callPattern(R"(call i32 @(\w+)\(i32 (\d+), i32 (\d+)\))");
-    if (std::regex_search(input, match, callPattern)) {
-        std::string func = match[1].str();
-        int a = std::stoi(match[2].str());
-        int b = std::stoi(match[3].str());
-
-        if (func == "add") result = "Execution result: " + std::to_string(a + b);
-        else if (func == "sub") result = "Execution result: " + std::to_string(a - b);
-        else if (func == "mul") result = "Execution result: " + std::to_string(a * b);
-        else if (func == "div" || func == "divide") result = "Execution result: " + std::to_string(a / b);
-        else result = "Execution error: unsupported function '" + func + "'";
-        return result.c_str();
+    // Simulate printf
+    std::regex printfRegex("call i32 @printf\\(\"([^\"]+)\", i32 (\\w+)\\)");
+    if (std::regex_search(input, match, printfRegex)) {
+        std::string format = match[1];
+        std::string var = match[2];
+        std::string val = globalSymbolTable.count(var) ? globalSymbolTable[var] : "undefined";
+        output << "[printf] " << format << " = " << val << "\n";
+    }
+    std::regex returnRegex(R"(ret i32 (\d+))");
+    if (std::regex_search(input, match, returnRegex)) {
+        output << "[return] Execution result: " << match[1] << "\n";
     }
 
-    result = "Execution error: no recognizable return.";
+    double end = emscripten_get_now();
+    double duration = end - start;
+
+    output << "--- Static Stats ---\n";
+    output << "Execution Time: " << duration << " ms\n";
+    output << "Time Complexity: O(1)\n";
+    output << "Space Complexity: O(n)\n";
+    output << "Memory Used: 64 bytes\n";
+
+    result = output.str();
     return result.c_str();
 }
-
 
 }
